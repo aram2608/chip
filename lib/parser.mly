@@ -33,20 +33,21 @@
 /* Grammar Rules */
 
 stmlist:
-   l = separated_nonempty_list(SEMI, stm) { l }
+   l = list(stm) { l }
 ;
 
 prog:
    l = stmlist EOF { Ast.Seq l }
 ;
 
+/* TODO: Fix this so that statements handle ; in a smarter manner */
 stm:
-    x = ID ASSIGN  y = expr {  Ast.Assign (x, y) }
+    x = ID ASSIGN y = expr SEMI {  Ast.Assign (x, y) }
   | WHILE c = expr DO body = stm { Ast.While (c, body) }
   | IF c = expr THEN t = stm { Ast.If (c, t) }
   | IF c = expr THEN t = stm ELSE e = stm { Ast.IfElse (c, t, e) }
-  | PRINT c = expr { Ast.Print (c) }
-  | c = expr { Ast.ExpStmt (c) }
+  | PRINT c = expr SEMI { Ast.Print (c) }
+  | c = expr SEMI { Ast.ExpStmt (c) }
   | LBRACE l = stmlist RBRACE { Ast.Block l }
   | BEGIN l = stmlist END { Ast.Seq l }
 ;

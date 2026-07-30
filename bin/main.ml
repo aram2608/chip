@@ -14,8 +14,7 @@ let () =
   if count > 1 then begin
     let source = In_channel.with_open_text Sys.argv.(1) In_channel.input_all in
     let p = parse_string source in
-    let env = Hashtbl.create 16 in
-    let _last_env = Chip.Interp.interpret env p in
+    let _last_env = Chip.Interp.interpret p in
     ()
   end
   else begin
