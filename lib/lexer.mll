@@ -26,6 +26,10 @@ rule token = parse
   | "-"            { MINUS }
   | "/"            { SLASH }
   | "*"            { STAR }
+  | "{"            { LBRACE }
+  | "}"            { RBRACE }
+  | "("            { LPAREN }
+  | ")"            { RPAREN }
   | id as word     { ID word }
   | int_lit as lxm { INT (int_of_string lxm) }
   | flt_lit as lxm { FLOAT (float_of_string lxm) }

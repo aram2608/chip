@@ -10,6 +10,7 @@ type expr =
 type stm =
   | Assign of string * expr
   | While of expr * stm
+  | Block of stm list
   | Seq of stm list
   | If of expr * stm
   | IfElse of expr * stm * stm

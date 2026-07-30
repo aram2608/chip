@@ -1,7 +1,8 @@
 %token <string> ID
 %token <int> INT
 %token <float> FLOAT
-%token WHILE BEGIN END DO IF THEN ELSE SEMI ASSIGN PRINT PLUS MINUS SLASH STAR EOF
+%token WHILE BEGIN END DO IF THEN ELSE SEMI 
+%token ASSIGN PRINT PLUS MINUS SLASH STAR LPAREN RPAREN LBRACE RBRACE EOF
 
 
 (* For an if case where does else attach to? 
@@ -46,6 +47,7 @@ stm:
   | IF c = expr THEN t = stm ELSE e = stm { Ast.IfElse (c, t, e) }
   | PRINT c = expr { Ast.Print (c) }
   | c = expr { Ast.ExpStmt (c) }
+  | LBRACE l = stmlist RBRACE { Ast.Block l }
   | BEGIN l = stmlist END { Ast.Seq l }
 ;
 
