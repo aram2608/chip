@@ -1,0 +1,11 @@
+(library
+ (name chip)
+
+ (libraries menhirLib))
+
+(menhir
+ (modules parser))
+
+(ocamllex
+ (modules lexer))
+
