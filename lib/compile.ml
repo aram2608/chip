@@ -1,0 +1,171 @@
+open Bytecode
+open Value
+
+type expr_result =
+  | KConst of Object.value
+  | KIndex of int
+  | Register of int
+  | Local of int
+
+let get_inst (b : block) (idx : int) : Code.inst = b.code.(idx)
+let inst_count (b : block) : int = Array.length b.code
+
+type builder = {
+  constants : Object.value Dynarray.t;
+  const_map : (Object.value, int) Hashtbl.t;
+  mutable code : Code.inst list;
+}
+
+let make_builder () =
+  { constants = Dynarray.create (); const_map = Hashtbl.create 16; code = [] }
+
+let add_constant b v =
+  match Hashtbl.find_opt b.const_map v with
+  | Some idx -> idx
+  | None ->
+      let idx = Dynarray.length b.constants in
+      Dynarray.add_last b.constants v;
+      Hashtbl.add b.const_map v idx;
+      idx
+
+let get_constant builder idx = Dynarray.get builder.constants idx
+let emit builder inst = builder.code <- inst :: builder.code
+
+let freeze builder : block =
+  {
+    constants = Dynarray.to_array builder.constants;
+    code = Array.of_list (List.rev builder.code);
+  }
+
+type func_state = {
+  b : builder;
+  locals : (string, int) Hashtbl.t;
+  mutable free_reg : int;
+  mutable max_reg : int;
+  mutable n_locals : int;
+}
+
+let make_fs () =
+  {
+    b = make_builder ();
+    locals = Hashtbl.create 16;
+    free_reg = 0;
+    max_reg = 0;
+    n_locals = 0;
+  }
+
+exception CompTimeError of string
+
+let alloc_reg fs =
+  let r = fs.free_reg in
+  fs.free_reg <- fs.free_reg + 1;
+  if fs.free_reg > fs.max_reg then fs.max_reg <- fs.free_reg;
+  r
+
+let free_reg fs r =
+  if r >= fs.n_locals then begin
+    assert (r = fs.free_reg - 1);
+    fs.free_reg <- fs.free_reg - 1
+  end
+
+let free_exp fs = function Register r -> free_reg fs r | _ -> ()
+
+let reserve_local fs name =
+  match Hashtbl.find_opt fs.locals name with
+  | Some slot -> slot
+  | None ->
+      let slot = fs.n_locals in
+      Hashtbl.add fs.locals name slot;
+      fs.n_locals <- fs.n_locals + 1;
+      fs.free_reg <- fs.free_reg + 1;
+      if fs.free_reg > fs.max_reg then fs.max_reg <- fs.free_reg;
+      slot
+
+let resolve_var fs name =
+  match Hashtbl.find_opt fs.locals name with
+  | Some slot -> Local slot
+  | None -> raise (CompTimeError ("Undefined variable: " ^ name))
+
+let exp2rk fs = function
+  | Register r | Local r -> Code.R r
+  | KIndex i -> Code.K i
+  | KConst v -> Code.K (add_constant fs.b v)
+
+let discharge_to_reg fs reg = function
+  | KConst v -> emit fs.b (Code.LoadK (reg, add_constant fs.b v))
+  | KIndex i -> emit fs.b (Code.LoadK (reg, i))
+  | Register r | Local r -> if r <> reg then emit fs.b (Code.Move (reg, r))
+
+let rec compile_exp fs = function
+  | Ast.Binop (op, lhs, rhs) -> (
+      let e1 = compile_exp fs lhs in
+      let e2 = compile_exp fs rhs in
+      match (e1, e2) with
+      | KConst (Object.Int a), KConst (Object.Int b) -> (
+          match op with
+          | Ast.Add -> KConst (Object.Int (a + b))
+          | Ast.Sub -> KConst (Object.Int (a - b))
+          | Ast.Mul -> KConst (Object.Int (a * b))
+          | Ast.Div ->
+              if b = 0 then raise (CompTimeError "Division by zero")
+              else KConst (Object.Int (a / b)))
+      | KConst (Object.Float a), KConst (Object.Float b) -> (
+          match op with
+          | Ast.Add -> KConst (Object.Float (a +. b))
+          | Ast.Sub -> KConst (Object.Float (a -. b))
+          | Ast.Mul -> KConst (Object.Float (a *. b))
+          | Ast.Div ->
+              if b = 0.0 then raise (CompTimeError "Division by zero")
+              else KConst (Object.Float (a /. b)))
+      | KConst (Object.String a), KConst (Object.String b) -> (
+          match op with
+          | Ast.Add -> KConst (Object.String (a ^ b))
+          | _ -> raise (CompTimeError "Invalid operation for string literal"))
+      | _ ->
+          let a = exp2rk fs e1 in
+          let b = exp2rk fs e2 in
+          free_exp fs e2;
+          free_exp fs e1;
+          let dst = alloc_reg fs in
+          let inst =
+            match op with
+            | Ast.Add -> Code.Add (dst, a, b)
+            | Ast.Sub -> Code.Sub (dst, a, b)
+            | Ast.Mul -> Code.Mul (dst, a, b)
+            | Ast.Div -> Code.Div (dst, a, b)
+          in
+          emit fs.b inst;
+          Register dst)
+  | Ast.IntLit i -> KConst (Object.Int i)
+  | Ast.FloatLit f -> KConst (Object.Float f)
+  | Ast.StringLit s -> KConst (Object.String s)
+  | Ast.Var name -> resolve_var fs name
+
+let rec compile_stm fs = function
+  | Ast.ExpStmt e ->
+      let r = compile_exp fs e in
+      free_exp fs r
+  | Ast.Assign (x, e) ->
+      let slot = reserve_local fs x in
+      let e' = compile_exp fs e in
+      discharge_to_reg fs slot e';
+      free_exp fs e'
+  | Ast.Print e ->
+      let e' = compile_exp fs e in
+      let r =
+        match e' with
+        | Register r -> r
+        | _ ->
+            let r = alloc_reg fs in
+            discharge_to_reg fs r e';
+            r
+      in
+      emit fs.b (Code.Print r);
+      free_exp fs (Register r)
+  | Ast.Seq stmts | Ast.Block stmts -> List.iter (compile_stm fs) stmts
+  | _ -> raise (CompTimeError "TODO: CompileStmt")
+
+let compile_program (s : Ast.stm) : proto =
+  let fs = make_fs () in
+  compile_stm fs s;
+  { block = freeze fs.b; arity = 0; max_regs = fs.max_reg }

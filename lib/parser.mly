@@ -1,6 +1,7 @@
 %token <string> ID
 %token <int> INT
 %token <float> FLOAT
+%token <string> STRING
 %token WHILE BEGIN END DO IF THEN ELSE SEMI 
 %token ASSIGN PRINT PLUS MINUS SLASH STAR LPAREN RPAREN LBRACE RBRACE EOF
 
@@ -56,7 +57,9 @@ expr:
     x = ID  { Ast.Var x }
   | n = INT { Ast.IntLit n }
   | n = FLOAT { Ast.FloatLit n }
+  | n = STRING { Ast.StringLit n }
   | lhs = expr op = binop rhs = expr { Ast.Binop (op, lhs, rhs) }
+  | LPAREN e = expr RPAREN { e }
 ;
 
 %inline binop:
