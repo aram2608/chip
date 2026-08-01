@@ -245,6 +245,29 @@ let rec compile_stm fs = function
       emit fs.b (create_ABCk Print r 0 0 0);
       free_exp fs (Register r)
   | Ast.Seq stmts | Ast.Block stmts -> List.iter (compile_stm fs) stmts
+  | Ast.While (e, b) ->
+      let base = fs.free_reg in
+      let jmp = emit_jmp fs.b in
+      let top = Dynarray.length fs.b.code in
+
+      compile_stm fs b;
+
+      patch_jmp_to_here fs.b jmp;
+      let c' = compile_exp fs e in
+
+      let rc =
+        match c' with
+        | Register r -> r
+        | _ ->
+            let r = alloc_reg fs in
+            discharge_to_reg fs r c';
+            r
+      in
+
+      emit fs.b (create_ABCk Test rc 0 0 1);
+      emit_jmp_to fs.b top;
+
+      fs.free_reg <- base
   | Ast.For (i, c, s, b) ->
       compile_stm fs i;
       let base = fs.free_reg in

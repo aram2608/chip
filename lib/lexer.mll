@@ -17,7 +17,6 @@ rule token = parse
   | "while"        { WHILE }
   | "begin"        { BEGIN }
   | "end"          { END }
-  | "do"           { DO }
   | "if"           { IF }
   | "then"         { THEN }
   | "else"         { ELSE }

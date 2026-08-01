@@ -13,3 +13,9 @@ for i := 2; i <= r; i = i + 1 {
 }
 
 print b;
+
+t := 0;
+while t <= 10 {
+    t = t + 1;
+    print t;
+}

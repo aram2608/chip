@@ -49,7 +49,7 @@ block:
 
 stm:
     s = simple_stm SEMI                   { s }
-  | WHILE c = expr DO body = stm          { Ast.While (c, body) }
+  | WHILE c = expr body = stm          { Ast.While (c, body) }
   | IF c = expr THEN t = stm %prec THEN   { Ast.If (c, t) }
   | IF c = expr THEN t = stm ELSE e = stm { Ast.IfElse (c, t, e) }
   | FOR i = simple_stm SEMI 
