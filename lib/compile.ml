@@ -13,11 +13,15 @@ let inst_count (b : block) : int = Array.length b.code
 type builder = {
   constants : Object.value Dynarray.t;
   const_map : (Object.value, int) Hashtbl.t;
-  mutable code : int list;
+  code : int Dynarray.t;
 }
 
 let make_builder () =
-  { constants = Dynarray.create (); const_map = Hashtbl.create 16; code = [] }
+  {
+    constants = Dynarray.create ();
+    const_map = Hashtbl.create 16;
+    code = Dynarray.create ();
+  }
 
 let add_constant b v =
   match Hashtbl.find_opt b.const_map v with
@@ -29,31 +33,21 @@ let add_constant b v =
       idx
 
 let get_constant builder idx = Dynarray.get builder.constants idx
-let emit builder inst = builder.code <- inst :: builder.code
+let emit builder inst = Dynarray.add_last builder.code inst
 
+(* Emit a placeholder jump and return its index so it can be patched later. *)
 let emit_jmp builder =
-  builder.code <- create_sj Jmp 0 0 :: builder.code;
-  List.length builder.code - 1
+  Dynarray.add_last builder.code (create_sj Jmp 0 0);
+  Dynarray.length builder.code - 1
 
 let patch_jmp_to_here builder idx =
-  let current_len = List.length builder.code in
-  let offset = current_len - 1 - idx in
-
-  (* In-place list update helper *)
-  let rec update_list idx curr = function
-    | [] -> []
-    | h :: t ->
-        if curr = idx then
-          (* Replace placeholder with the real offset *)
-          create_sj Jmp offset 0 :: t
-        else h :: update_list idx (curr + 1) t
-  in
-  builder.code <- update_list idx 0 builder.code
+  let offset = Dynarray.length builder.code - 1 - idx in
+  Dynarray.set builder.code idx (create_sj Jmp offset 0)
 
 let freeze builder : block =
   {
     constants = Dynarray.to_array builder.constants;
-    code = Array.of_list (List.rev builder.code);
+    code = Dynarray.to_array builder.code;
   }
 
 type func_state = {
