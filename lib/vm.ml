@@ -1,5 +1,18 @@
 open Bytecode
 open Value
+open Compile
+
+type vm = {
+  mutable regs : Object.value Array.t;
+  mutable pc : int;
+  mutable bp : int;
+  proto : proto;
+}
+
+let make_vm p =
+  { regs = Array.make (max_regs + 1) Object.Null; pc = 0; bp = 0; proto = p }
+
+let r vm r = vm.regs.(vm.bp + r)
 
 exception RuntimeError of string
 
@@ -7,47 +20,58 @@ let to_float = function
   | Object.Int i -> float_of_int i
   | Object.Float f -> f
   | Object.String _ -> raise (RuntimeError "expected number")
+  | Object.Null -> raise (RuntimeError "expected number")
 
-let apply op a b =
+let apply (op : op) a b =
   let open Object in
   match (op, a, b) with
-  | `Add, Int x, Int y -> Int (x + y)
-  | `Sub, Int x, Int y -> Int (x - y)
-  | `Mul, Int x, Int y -> Int (x * y)
-  | `Div, Int x, Int y ->
+  | Add, Int x, Int y -> Int (x + y)
+  | Sub, Int x, Int y -> Int (x - y)
+  | Mult, Int x, Int y -> Int (x * y)
+  | Div, Int x, Int y ->
       if y = 0 then raise (RuntimeError "Division by zero") else Int (x / y)
-  | `Add, String x, String y -> String (x ^ y)
-  | (`Add | `Sub | `Mul | `Div), (Int _ | Float _), (Int _ | Float _) -> (
+  | Add, String x, String y -> String (x ^ y)
+  | (Add | Sub | Mult | Div), (Int _ | Float _), (Int _ | Float _) -> (
       let x = to_float a and y = to_float b in
       match op with
-      | `Add -> Float (x +. y)
-      | `Sub -> Float (x -. y)
-      | `Mul -> Float (x *. y)
-      | `Div ->
+      | Add -> Float (x +. y)
+      | Sub -> Float (x -. y)
+      | Mult -> Float (x *. y)
+      | Div ->
           if y = 0.0 then raise (RuntimeError "Division by zero")
-          else Float (x /. y))
+          else Float (x /. y)
+      | _ -> assert false)
   | _ -> raise (RuntimeError "Type error in binary operation")
 
 let print_value = function
   | Object.Int i -> print_endline (string_of_int i)
   | Object.Float f -> print_endline (string_of_float f)
   | Object.String s -> print_endline s
+  | Object.Null -> print_endline "null"
 
-let exec (p : proto) =
-  let consts = p.block.constants in
-  let code = p.block.code in
+let is_truthy = function
+  | Object.Int i -> i <> 0
+  | Object.Float f -> f <> 0.0
+  | Object.String s -> s <> ""
+  | Object.Null -> false
+
+let set vm i v = vm.regs.(vm.bp + i) <- v
+
+let exec (vm : vm) =
+  let consts = vm.proto.block.constants in
+  let code = vm.proto.block.code in
   let n = Array.length code in
-  let regs = Array.make (max p.max_regs 1) (Object.Int 0) in
-  let rk = function Code.R r -> regs.(r) | Code.K k -> consts.(k) in
-  let pc = ref 0 in
-  while !pc < n do
-    (match code.(!pc) with
-    | Code.LoadK (dst, k) -> regs.(dst) <- consts.(k)
-    | Code.Move (dst, src) -> regs.(dst) <- regs.(src)
-    | Code.Add (dst, a, b) -> regs.(dst) <- apply `Add (rk a) (rk b)
-    | Code.Sub (dst, a, b) -> regs.(dst) <- apply `Sub (rk a) (rk b)
-    | Code.Mul (dst, a, b) -> regs.(dst) <- apply `Mul (rk a) (rk b)
-    | Code.Div (dst, a, b) -> regs.(dst) <- apply `Div (rk a) (rk b)
-    | Code.Print r -> print_value regs.(r));
-    incr pc
+  while vm.pc < n do
+    let i = code.(vm.pc) in
+    (match op_of_enum (get_opcode i) with
+    | Some LoadK -> set vm (get_a i) consts.(get_bx i)
+    | Some Move -> set vm (get_a i) (r vm (get_b i))
+    | Some ((Add | Sub | Mult | Div) as op) ->
+        set vm (get_a i) (apply op (r vm (get_b i)) (r vm (get_c i)))
+    | Some Print -> print_value (r vm (get_a i))
+    | Some Test ->
+        if is_truthy vm.regs.(get_a i) <> (get_k i = 1) then vm.pc <- vm.pc + 1
+    | Some Jmp -> vm.pc <- vm.pc + get_sj i
+    | Some _ | None -> raise (RuntimeError "Unknown opcode"));
+    vm.pc <- vm.pc + 1
   done

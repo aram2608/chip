@@ -22,6 +22,7 @@ rule token = parse
   | "then"         { THEN }
   | "else"         { ELSE }
   | "print"        { PRINT }
+  | "proc"         { PROC  }
   | ";"            { SEMI }
   | ":="           { ASSIGN }
   | "+"            { PLUS }

@@ -1,7 +1,8 @@
 (library
  (name chip)
 
- (libraries menhirLib))
+ (libraries menhirLib)
+ (preprocess (pps ppx_deriving.enum ppx_deriving.show)))
 
 (menhir
  (modules parser))

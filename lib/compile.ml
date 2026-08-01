@@ -7,13 +7,13 @@ type expr_result =
   | Register of int
   | Local of int
 
-let get_inst (b : block) (idx : int) : Code.inst = b.code.(idx)
+let get_inst (b : block) (idx : int) : int = b.code.(idx)
 let inst_count (b : block) : int = Array.length b.code
 
 type builder = {
   constants : Object.value Dynarray.t;
   const_map : (Object.value, int) Hashtbl.t;
-  mutable code : Code.inst list;
+  mutable code : int list;
 }
 
 let make_builder () =
@@ -30,6 +30,25 @@ let add_constant b v =
 
 let get_constant builder idx = Dynarray.get builder.constants idx
 let emit builder inst = builder.code <- inst :: builder.code
+
+let emit_jmp builder =
+  builder.code <- create_sj Jmp 0 0 :: builder.code;
+  List.length builder.code - 1
+
+let patch_jmp_to_here builder idx =
+  let current_len = List.length builder.code in
+  let offset = current_len - 1 - idx in
+
+  (* In-place list update helper *)
+  let rec update_list idx curr = function
+    | [] -> []
+    | h :: t ->
+        if curr = idx then
+          (* Replace placeholder with the real offset *)
+          create_sj Jmp offset 0 :: t
+        else h :: update_list idx (curr + 1) t
+  in
+  builder.code <- update_list idx 0 builder.code
 
 let freeze builder : block =
   {
@@ -86,15 +105,30 @@ let resolve_var fs name =
   | Some slot -> Local slot
   | None -> raise (CompTimeError ("Undefined variable: " ^ name))
 
-let exp2rk fs = function
-  | Register r | Local r -> Code.R r
-  | KIndex i -> Code.K i
-  | KConst v -> Code.K (add_constant fs.b v)
+let reg_of = function Register r | Local r -> r | _ -> assert false
+
+let discharge_any fs = function
+  | (Register _ | Local _) as e -> e
+  | KConst v ->
+      let r = alloc_reg fs in
+      emit fs.b (create_ABx LoadK r (add_constant fs.b v));
+      Register r
+  | KIndex i ->
+      let r = alloc_reg fs in
+      emit fs.b (create_ABx LoadK r i);
+      Register r
 
 let discharge_to_reg fs reg = function
-  | KConst v -> emit fs.b (Code.LoadK (reg, add_constant fs.b v))
-  | KIndex i -> emit fs.b (Code.LoadK (reg, i))
-  | Register r | Local r -> if r <> reg then emit fs.b (Code.Move (reg, r))
+  | KConst v -> emit fs.b (create_ABx LoadK reg (add_constant fs.b v))
+  | KIndex i -> emit fs.b (create_ABx LoadK reg i)
+  | Register r | Local r ->
+      if r <> reg then emit fs.b (create_ABCk Move reg r 0 0)
+
+let arith_of_binop = function
+  | Ast.Add -> Add
+  | Ast.Sub -> Sub
+  | Ast.Mul -> Mult
+  | Ast.Div -> Div
 
 let rec compile_exp fs = function
   | Ast.Binop (op, lhs, rhs) -> (
@@ -122,19 +156,13 @@ let rec compile_exp fs = function
           | Ast.Add -> KConst (Object.String (a ^ b))
           | _ -> raise (CompTimeError "Invalid operation for string literal"))
       | _ ->
-          let a = exp2rk fs e1 in
-          let b = exp2rk fs e2 in
+          let e1 = discharge_any fs e1 in
+          let e2 = discharge_any fs e2 in
+          let a = reg_of e1 and b = reg_of e2 in
           free_exp fs e2;
           free_exp fs e1;
           let dst = alloc_reg fs in
-          let inst =
-            match op with
-            | Ast.Add -> Code.Add (dst, a, b)
-            | Ast.Sub -> Code.Sub (dst, a, b)
-            | Ast.Mul -> Code.Mul (dst, a, b)
-            | Ast.Div -> Code.Div (dst, a, b)
-          in
-          emit fs.b inst;
+          emit fs.b (create_ABCk (arith_of_binop op) dst a b 0);
           Register dst)
   | Ast.IntLit i -> KConst (Object.Int i)
   | Ast.FloatLit f -> KConst (Object.Float f)
@@ -160,9 +188,29 @@ let rec compile_stm fs = function
             discharge_to_reg fs r e';
             r
       in
-      emit fs.b (Code.Print r);
+      emit fs.b (create_ABCk Print r 0 0 0);
       free_exp fs (Register r)
   | Ast.Seq stmts | Ast.Block stmts -> List.iter (compile_stm fs) stmts
+  | Ast.If (e, stm) ->
+      let base = fs.free_reg in
+      let c' = compile_exp fs e in
+      let rc =
+        match c' with
+        | Register r -> r
+        | _ ->
+            let r = alloc_reg fs in
+            discharge_to_reg fs r c';
+            r
+      in
+      emit fs.b (create_ABCk Test rc 0 0 0);
+      let jmp_end = emit_jmp fs.b in
+
+      (* condition register is dead once Test/Jmp are emitted *)
+      fs.free_reg <- base;
+      compile_stm fs stm;
+      patch_jmp_to_here fs.b jmp_end;
+      (* body balances its own registers; restore to base defensively *)
+      fs.free_reg <- base
   | _ -> raise (CompTimeError "TODO: CompileStmt")
 
 let compile_program (s : Ast.stm) : proto =

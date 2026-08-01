@@ -15,7 +15,7 @@ let () =
     let source = In_channel.with_open_text Sys.argv.(1) In_channel.input_all in
     let p = parse_string source in
     let proto = Chip.Compile.compile_program p in
-    Chip.Vm.exec proto
+    Chip.Vm.exec (Chip.Vm.make_vm proto)
   end
   else begin
     prerr_string "Missing file";
