@@ -6,9 +6,9 @@
 (using menhir 3.0)
 
 (source
- (github username/reponame))
+ (github aram2608/chip))
 
-(authors "Author Name <author@example.com>")
+(authors "Javier Arambula Rascon <arambula.javier7@gmail.com>")
 
 (license LICENSE)
 
@@ -16,11 +16,12 @@
 
 (package
  (name chip)
- (synopsis "A short synopsis")
- (description "A longer description")
+ (synopsis "Toy scripting language.")
+ (description "Port of Lua bytecode-style VM to Ocaml.")
  (depends 
    ocaml
    menhir
+   alcotest
    menhirLib))
 
 ; See the complete stanza docs at https://dune.readthedocs.io/en/stable/reference/dune-project/index.html

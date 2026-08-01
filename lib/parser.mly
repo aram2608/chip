@@ -2,8 +2,9 @@
 %token <int> INT
 %token <float> FLOAT
 %token <string> STRING
-%token WHILE BEGIN END DO IF THEN ELSE SEMI PROC
-%token ASSIGN PRINT PLUS MINUS SLASH STAR LPAREN RPAREN LBRACE RBRACE EOF
+%token WHILE BEGIN END DO IF THEN ELSE FOR SEMI PROC
+%token DECL ASSIGN PRINT PLUS MINUS SLASH STAR LPAREN RPAREN 
+%token LESSER GREATER LEQUAL GEQUAL EQEQ NEQUAL LBRACE RBRACE RETURN EOF
 
 
 (* For an if case where does else attach to? 
@@ -24,6 +25,7 @@
 %nonassoc THEN 
 %nonassoc ELSE
 
+%left LESSER GREATER LEQUAL GEQUAL EQEQ NEQUAL
 %left PLUS MINUS
 %left STAR SLASH
 
@@ -41,25 +43,38 @@ prog:
    l = stmlist EOF { Ast.Seq l }
 ;
 
-/* TODO: Fix this so that statements handle ; in a smarter manner */
+block:
+    LBRACE l = stmlist RBRACE             { Ast.Block l }
+;
+
 stm:
-    x = ID ASSIGN y = expr SEMI {  Ast.Assign (x, y) }
-  | WHILE c = expr DO body = stm { Ast.While (c, body) }
-  | IF c = expr THEN t = stm { Ast.If (c, t) }
+    s = simple_stm SEMI                   { s }
+  | WHILE c = expr DO body = stm          { Ast.While (c, body) }
+  | IF c = expr THEN t = stm %prec THEN   { Ast.If (c, t) }
   | IF c = expr THEN t = stm ELSE e = stm { Ast.IfElse (c, t, e) }
-  | PRINT c = expr SEMI { Ast.Print (c) }
-  | c = expr SEMI { Ast.ExpStmt (c) }
-  | LBRACE l = stmlist RBRACE { Ast.Block l }
-  | BEGIN l = stmlist END { Ast.Seq l }
+  | FOR i = simple_stm SEMI 
+        c = expr SEMI 
+        s = simple_stm
+        b = block                         { Ast.For (i, c, s, b) }
+  | b = block                             { b }
+  | BEGIN l = stmlist END                 { Ast.Seq l }
+;
+
+simple_stm:
+    x = ID DECL y = expr                  { Ast.Decl (x, y) }
+  | x = ID ASSIGN y = expr                  { Ast.Assign (x, y) }
+  | PRINT c = expr                        { Ast.Print (c) }
+  | c = expr                              { Ast.ExpStmt c }
 ;
 
 expr:
-    x = ID  { Ast.Var x }
-  | n = INT { Ast.IntLit n }
-  | n = FLOAT { Ast.FloatLit n }
-  | n = STRING { Ast.StringLit n }
-  | lhs = expr op = binop rhs = expr { Ast.Binop (op, lhs, rhs) }
-  | LPAREN e = expr RPAREN { e }
+    x = ID                                { Ast.Var x }
+  | n = INT                               { Ast.IntLit n }
+  | n = FLOAT                             { Ast.FloatLit n }
+  | n = STRING                            { Ast.StringLit n }
+  | lhs = expr op = binop rhs = expr      { Ast.Binop (op, lhs, rhs) }
+  | lhs = expr op = comp rhs = expr       { Ast.Comp  (op, lhs, rhs) }
+  | LPAREN e = expr RPAREN                { e }
 ;
 
 %inline binop:
@@ -67,5 +82,13 @@ expr:
   | MINUS { Ast.Sub }
   | STAR  { Ast.Mul }
   | SLASH { Ast.Div }
+
+%inline comp:
+  | LESSER  { Ast.Lesser }
+  | GREATER { Ast.Greater }
+  | LEQUAL  { Ast.LEqual }
+  | GEQUAL  { Ast.GEqual }
+  | EQEQ    { Ast.Equal  }
+  | NEQUAL  { Ast.NEqual }
 
 %%

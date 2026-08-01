@@ -21,14 +21,23 @@ rule token = parse
   | "if"           { IF }
   | "then"         { THEN }
   | "else"         { ELSE }
+  | "for"          { FOR }
   | "print"        { PRINT }
   | "proc"         { PROC  }
+  | "return"       { RETURN }
   | ";"            { SEMI }
-  | ":="           { ASSIGN }
+  | ":="           { DECL }
+  | "="            { ASSIGN }
   | "+"            { PLUS }
   | "-"            { MINUS }
   | "/"            { SLASH }
   | "*"            { STAR }
+  | "<"            { LESSER }
+  | ">"            { GREATER }
+  | "<="           { LEQUAL }
+  | ">="           { GEQUAL }
+  | "=="           { EQEQ }
+  | "!="           { NEQUAL }
   | "{"            { LBRACE }
   | "}"            { RBRACE }
   | "("            { LPAREN }

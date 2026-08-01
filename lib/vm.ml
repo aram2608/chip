@@ -43,6 +43,22 @@ let apply (op : op) a b =
       | _ -> assert false)
   | _ -> raise (RuntimeError "Type error in binary operation")
 
+let compare (op : op) a b =
+  let open Object in
+  match (op, a, b) with
+  | LE, Int x, Int y -> Int (Bool.to_int (x <= y))
+  | LT, Int x, Int y -> Int (Bool.to_int (x < y))
+  | GE, Int x, Int y -> Int (Bool.to_int (x >= y))
+  | GT, Int x, Int y -> Int (Bool.to_int (x > y))
+  | NE, Int x, Int y -> Int (Bool.to_int (x <> y))
+  | LE, Float x, Float y -> Int (Bool.to_int (x <= y))
+  | LT, Float x, Float y -> Int (Bool.to_int (x < y))
+  | GE, Float x, Float y -> Int (Bool.to_int (x >= y))
+  | GT, Float x, Float y -> Int (Bool.to_int (x > y))
+  | EQ, String x, String y -> Int (Bool.to_int (String.equal x y))
+  | NE, String x, String y -> Int (Bool.to_int (x <> y))
+  | _ -> raise (RuntimeError "Type error in comparison operation")
+
 let print_value = function
   | Object.Int i -> print_endline (string_of_int i)
   | Object.Float f -> print_endline (string_of_float f)
@@ -68,6 +84,8 @@ let exec (vm : vm) =
     | Some Move -> set vm (get_a i) (r vm (get_b i))
     | Some ((Add | Sub | Mult | Div) as op) ->
         set vm (get_a i) (apply op (r vm (get_b i)) (r vm (get_c i)))
+    | Some ((LE | LT | GE | GT | NE | EQ) as op) ->
+        set vm (get_a i) (compare op (r vm (get_b i)) (r vm (get_c i)))
     | Some Print -> print_value (r vm (get_a i))
     | Some Test ->
         if is_truthy vm.regs.(get_a i) <> (get_k i = 1) then vm.pc <- vm.pc + 1

@@ -34,14 +34,22 @@ let add_constant b v =
 
 let get_constant builder idx = Dynarray.get builder.constants idx
 let emit builder inst = Dynarray.add_last builder.code inst
+let code_offset builder = Dynarray.length builder.code - 1
 
 (* Emit a placeholder jump and return its index so it can be patched later. *)
 let emit_jmp builder =
   Dynarray.add_last builder.code (create_sj Jmp 0 0);
-  Dynarray.length builder.code - 1
+  code_offset builder
+
+let emit_jmp_to builder target =
+  (* The VM applies get_sj then increments pc, so landing = idx + offset + 1,
+     where idx is the jmp's own index. Add first, then compute against it. *)
+  Dynarray.add_last builder.code (create_sj Jmp 0 0);
+  let idx = code_offset builder in
+  Dynarray.set builder.code idx (create_sj Jmp (target - idx - 1) 0)
 
 let patch_jmp_to_here builder idx =
-  let offset = Dynarray.length builder.code - 1 - idx in
+  let offset = code_offset builder - idx in
   Dynarray.set builder.code idx (create_sj Jmp offset 0)
 
 let freeze builder : block =
@@ -124,7 +132,49 @@ let arith_of_binop = function
   | Ast.Mul -> Mult
   | Ast.Div -> Div
 
+let comp_of_binop = function
+  | Ast.Lesser -> LT
+  | Ast.Greater -> GT
+  | Ast.GEqual -> GE
+  | Ast.LEqual -> LE
+  | Ast.Equal -> EQ
+  | Ast.NEqual -> NE
+
 let rec compile_exp fs = function
+  | Ast.Comp (op, lhs, rhs) -> (
+      let e1 = compile_exp fs lhs in
+      let e2 = compile_exp fs rhs in
+      match (e1, e2) with
+      | KConst (Object.Int a), KConst (Object.Int b) -> (
+          match op with
+          | Ast.Equal -> KConst (Object.Int (Bool.to_int (a = b)))
+          | Ast.Lesser -> KConst (Object.Int (Bool.to_int (a < b)))
+          | Ast.LEqual -> KConst (Object.Int (Bool.to_int (a <= b)))
+          | Ast.Greater -> KConst (Object.Int (Bool.to_int (a > b)))
+          | Ast.GEqual -> KConst (Object.Int (Bool.to_int (a >= b)))
+          | Ast.NEqual -> KConst (Object.Int (Bool.to_int (a <> b))))
+      | KConst (Object.Float a), KConst (Object.Float b) -> (
+          match op with
+          | Ast.Equal -> KConst (Object.Int (Bool.to_int (a = b)))
+          | Ast.Lesser -> KConst (Object.Int (Bool.to_int (a < b)))
+          | Ast.LEqual -> KConst (Object.Int (Bool.to_int (a <= b)))
+          | Ast.Greater -> KConst (Object.Int (Bool.to_int (a > b)))
+          | Ast.GEqual -> KConst (Object.Int (Bool.to_int (a >= b)))
+          | Ast.NEqual -> KConst (Object.Int (Bool.to_int (a <> b))))
+      | KConst (Object.String a), KConst (Object.String b) -> (
+          match op with
+          | Ast.Equal -> KConst (Object.Int (Bool.to_int (String.equal a b)))
+          | Ast.NEqual -> KConst (Object.Int (Bool.to_int (a <> b)))
+          | _ -> raise (CompTimeError "Invalid operation for string literal"))
+      | _ ->
+          let e1 = discharge_any fs e1 in
+          let e2 = discharge_any fs e2 in
+          let a = reg_of e1 and b = reg_of e2 in
+          free_exp fs e2;
+          free_exp fs e1;
+          let dst = alloc_reg fs in
+          emit fs.b (create_ABCk (comp_of_binop op) dst a b 0);
+          Register dst)
   | Ast.Binop (op, lhs, rhs) -> (
       let e1 = compile_exp fs lhs in
       let e2 = compile_exp fs rhs in
@@ -167,8 +217,18 @@ let rec compile_stm fs = function
   | Ast.ExpStmt e ->
       let r = compile_exp fs e in
       free_exp fs r
-  | Ast.Assign (x, e) ->
+  | Ast.Decl (x, e) ->
       let slot = reserve_local fs x in
+      let e' = compile_exp fs e in
+      discharge_to_reg fs slot e';
+      free_exp fs e'
+  | Ast.Assign (x, e) ->
+      let local = resolve_var fs x in
+      let slot =
+        match local with
+        | Local l -> l
+        | _ -> raise (CompTimeError "Not a local")
+      in
       let e' = compile_exp fs e in
       discharge_to_reg fs slot e';
       free_exp fs e'
@@ -185,6 +245,30 @@ let rec compile_stm fs = function
       emit fs.b (create_ABCk Print r 0 0 0);
       free_exp fs (Register r)
   | Ast.Seq stmts | Ast.Block stmts -> List.iter (compile_stm fs) stmts
+  | Ast.For (i, c, s, b) ->
+      compile_stm fs i;
+      let base = fs.free_reg in
+      let jmp = emit_jmp fs.b in
+      let top = Dynarray.length fs.b.code in
+
+      compile_stm fs b;
+      compile_stm fs s;
+
+      patch_jmp_to_here fs.b jmp;
+      let c' = compile_exp fs c in
+      let rc =
+        match c' with
+        | Register r -> r
+        | _ ->
+            let r = alloc_reg fs in
+            discharge_to_reg fs r c';
+            r
+      in
+
+      emit fs.b (create_ABCk Test rc 0 0 1);
+      emit_jmp_to fs.b top;
+
+      fs.free_reg <- base
   | Ast.If (e, stm) ->
       let base = fs.free_reg in
       let c' = compile_exp fs e in
@@ -204,6 +288,30 @@ let rec compile_stm fs = function
       compile_stm fs stm;
       patch_jmp_to_here fs.b jmp_end;
       (* body balances its own registers; restore to base defensively *)
+      fs.free_reg <- base
+  | Ast.IfElse (e, th, el) ->
+      let base = fs.free_reg in
+      let c' = compile_exp fs e in
+      let rc =
+        match c' with
+        | Register r -> r
+        | _ ->
+            let r = alloc_reg fs in
+            discharge_to_reg fs r c';
+            r
+      in
+      emit fs.b (create_ABCk Test rc 0 0 0);
+      let jmp_else = emit_jmp fs.b in
+
+      fs.free_reg <- base;
+      compile_stm fs th;
+      let jmp_end = emit_jmp fs.b in
+      patch_jmp_to_here fs.b jmp_else;
+
+      fs.free_reg <- base;
+      compile_stm fs el;
+      patch_jmp_to_here fs.b jmp_end;
+
       fs.free_reg <- base
   | _ -> raise (CompTimeError "TODO: CompileStmt")
 
