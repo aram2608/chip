@@ -10,6 +10,7 @@ type expr =
   | Comp of comp * expr * expr
 
 type stm =
+  | BuiltinCall of string * expr list
   | Decl of string * expr
   | Assign of string * expr
   | While of expr * stm
@@ -20,4 +21,3 @@ type stm =
   | If of expr * stm
   | IfElse of expr * stm * stm
   | ExpStmt of expr
-  | Print of expr

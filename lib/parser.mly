@@ -1,9 +1,10 @@
 %token <string> ID
+%token <string> BUILTIN
 %token <int> INT
 %token <float> FLOAT
 %token <string> STRING
-%token WHILE BEGIN END DO IF THEN ELSE FOR SEMI PROC
-%token DECL ASSIGN PRINT PLUS MINUS SLASH STAR LPAREN RPAREN 
+%token WHILE BEGIN END DO IF THEN ELSE FOR SEMI PROC COMMA
+%token DECL ASSIGN PLUS MINUS SLASH STAR LPAREN RPAREN 
 %token LESSER GREATER LEQUAL GEQUAL EQEQ NEQUAL LBRACE RBRACE RETURN EOF
 
 
@@ -36,20 +37,24 @@
 /* Grammar Rules */
 
 stmlist:
-   l = list(stm) { l }
+   l = list(stm)                          { l }
 ;
 
 prog:
-   l = stmlist EOF { Ast.Seq l }
+   l = stmlist EOF                        { Ast.Seq l }
 ;
 
 block:
     LBRACE l = stmlist RBRACE             { Ast.Block l }
 ;
 
+arglist:
+    l = separated_list(COMMA, expr)       { l }
+;
+
 stm:
     s = simple_stm SEMI                   { s }
-  | WHILE c = expr body = stm          { Ast.While (c, body) }
+  | WHILE c = expr body = stm             { Ast.While (c, body) }
   | IF c = expr THEN t = stm %prec THEN   { Ast.If (c, t) }
   | IF c = expr THEN t = stm ELSE e = stm { Ast.IfElse (c, t, e) }
   | FOR i = simple_stm SEMI 
@@ -62,9 +67,10 @@ stm:
 
 simple_stm:
     x = ID DECL y = expr                  { Ast.Decl (x, y) }
-  | x = ID ASSIGN y = expr                  { Ast.Assign (x, y) }
-  | PRINT c = expr                        { Ast.Print (c) }
+  | x = ID ASSIGN y = expr                { Ast.Assign (x, y) }
   | c = expr                              { Ast.ExpStmt c }
+  | n = BUILTIN LPAREN 
+    args = arglist RPAREN                 { Ast.BuiltinCall (n, args) }
 ;
 
 expr:

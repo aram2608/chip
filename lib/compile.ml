@@ -1,5 +1,6 @@
 open Bytecode
 open Value
+open Builtin
 
 type expr_result =
   | KConst of Object.value
@@ -214,6 +215,31 @@ let rec compile_exp fs = function
   | Ast.Var name -> resolve_var fs name
 
 let rec compile_stm fs = function
+  | Ast.BuiltinCall (name, args) ->
+      let argc = List.length args in
+      let base = fs.free_reg in
+
+      let idx =
+        match Array.find_index (fun e -> e.name = name) natives with
+        | Some idx -> idx
+        | None -> raise (CompTimeError ("Unknown Builtin: " ^ name))
+      in
+
+      List.iteri
+        (fun k arg ->
+          let target = base + k in
+          let e = compile_exp fs arg in
+          discharge_to_reg fs target e;
+          fs.free_reg <- target + 1;
+          if fs.free_reg > fs.max_reg then fs.max_reg <- fs.free_reg)
+        args;
+
+      let arity = natives.(idx).arity in
+      if argc <> arity && arity <> Int.max_int then
+        raise (CompTimeError ("Arity mismatch for " ^ name));
+
+      emit fs.b (create_ABCk CallB base argc idx 0);
+      fs.free_reg <- base
   | Ast.ExpStmt e ->
       let r = compile_exp fs e in
       free_exp fs r
@@ -232,18 +258,6 @@ let rec compile_stm fs = function
       let e' = compile_exp fs e in
       discharge_to_reg fs slot e';
       free_exp fs e'
-  | Ast.Print e ->
-      let e' = compile_exp fs e in
-      let r =
-        match e' with
-        | Register r -> r
-        | _ ->
-            let r = alloc_reg fs in
-            discharge_to_reg fs r e';
-            r
-      in
-      emit fs.b (create_ABCk Print r 0 0 0);
-      free_exp fs (Register r)
   | Ast.Seq stmts | Ast.Block stmts -> List.iter (compile_stm fs) stmts
   | Ast.While (e, b) ->
       let base = fs.free_reg in
@@ -267,7 +281,7 @@ let rec compile_stm fs = function
       emit fs.b (create_ABCk Test rc 0 0 1);
       emit_jmp_to fs.b top;
 
-      fs.free_reg <- base
+      fs.free_reg <- Int.max base fs.n_locals
   | Ast.For (i, c, s, b) ->
       compile_stm fs i;
       let base = fs.free_reg in
@@ -291,7 +305,7 @@ let rec compile_stm fs = function
       emit fs.b (create_ABCk Test rc 0 0 1);
       emit_jmp_to fs.b top;
 
-      fs.free_reg <- base
+      fs.free_reg <- Int.max base fs.n_locals
   | Ast.If (e, stm) ->
       let base = fs.free_reg in
       let c' = compile_exp fs e in

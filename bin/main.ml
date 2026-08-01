@@ -9,15 +9,26 @@ let parse_string (input : string) : Ast.stm =
       (Printf.sprintf "Parse error at line %d, column %d" pos.pos_lnum
          (pos.pos_cnum - pos.pos_bol))
 
-let () =
-  let count = Array.length Sys.argv in
-  if count > 1 then begin
-    let source = In_channel.with_open_text Sys.argv.(1) In_channel.input_all in
-    let p = parse_string source in
-    let proto = Chip.Compile.compile_program p in
-    Chip.Vm.exec (Chip.Vm.make_vm proto)
-  end
-  else begin
-    prerr_string "Missing file";
-    ()
-  end
+let run file dis =
+  let source = In_channel.with_open_text file In_channel.input_all in
+  let p = parse_string source in
+  let proto = Chip.Compile.compile_program p in
+  if dis then Chip.Dis.print_proto proto
+  else Chip.Vm.exec (Chip.Vm.make_vm proto)
+
+open Cmdliner
+
+let file =
+  let doc = "The chip source file to run." in
+  Arg.(required & pos 0 (some file) None & info [] ~docv:"FILE" ~doc)
+
+let dis =
+  let doc = "Disassemble the compiled bytecode instead of running it." in
+  Arg.(value & flag & info [ "d"; "dis" ] ~doc)
+
+let cmd =
+  let doc = "Compile and run chip programs." in
+  let info = Cmd.info "chip" ~doc in
+  Cmd.v info Term.(const run $ file $ dis)
+
+let () = exit (Cmd.eval cmd)

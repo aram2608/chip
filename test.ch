@@ -1,7 +1,7 @@
 if "h" == "h" then
-    print "yes";
+    @print("yes");
 else
-    print "no";
+    @print("no");
 
 a := 0;
 b := 1;
@@ -12,10 +12,10 @@ for i := 2; i <= r; i = i + 1 {
     b = c;
 }
 
-print b;
+@print(b);
 
 t := 0;
 while t <= 10 {
     t = t + 1;
-    print t;
+    @print(t);
 }

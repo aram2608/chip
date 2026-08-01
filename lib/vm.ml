@@ -1,6 +1,7 @@
 open Bytecode
 open Value
 open Compile
+open Builtin
 
 type vm = {
   mutable regs : Object.value Array.t;
@@ -86,7 +87,10 @@ let exec (vm : vm) =
         set vm (get_a i) (apply op (r vm (get_b i)) (r vm (get_c i)))
     | Some ((LE | LT | GE | GT | NE | EQ) as op) ->
         set vm (get_a i) (compare op (r vm (get_b i)) (r vm (get_c i)))
-    | Some Print -> print_value (r vm (get_a i))
+    | Some CallB ->
+        let base = vm.bp + get_a i in
+        let argc = get_b i in
+        vm.regs.(base) <- natives.(get_c i).f (Array.sub vm.regs base argc)
     | Some Test ->
         if is_truthy vm.regs.(get_a i) <> (get_k i = 1) then vm.pc <- vm.pc + 1
     | Some Jmp -> vm.pc <- vm.pc + get_sj i
